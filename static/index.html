@@ -1,0 +1,960 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Job Constellation · Control Centre</title>
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/vendor/dagre.min.js"></script>
+<script src="/static/vendor/cytoscape-dagre.js"></script>
+<style>
+:root{
+  --bg:#070b1a; --bg2:#0d1430; --panel:#111a3a; --panel2:#16214a; --line:#25336b;
+  --text:#e8ecff; --muted:#8c97c9; --dim:#5b6699;
+  --job:#8b5cf6; --nb:#22d3ee; --tbl:#34d399; --file:#f472b6; --pl:#fbbf24; --link:#ff4d9d;
+  --ok:#22c55e; --bad:#ef4444; --run:#3b82f6; --warn:#f59e0b; --idle:#64748b;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:radial-gradient(1200px 700px at 15% -10%,#1d1a5c 0%,transparent 60%),radial-gradient(900px 600px at 110% 10%,#0f3d5c 0%,transparent 55%),var(--bg);color:var(--text);font:13px/1.4 "Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+button,select,input{font:inherit;color:inherit}
+.app{display:grid;grid-template-rows:auto auto 1fr;height:100vh;gap:10px;padding:12px}
+
+/* ---------- Top bar ---------- */
+.top{display:flex;align-items:center;gap:14px;background:linear-gradient(90deg,rgba(139,92,246,.18),rgba(34,211,238,.12) 50%,rgba(244,114,182,.15));border:1px solid var(--line);border-radius:var(--r);padding:10px 14px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.logo{width:34px;height:34px;border-radius:10px;background:conic-gradient(from 210deg,var(--job),var(--nb),var(--tbl),var(--pl),var(--file),var(--job));display:grid;place-items:center;box-shadow:0 0 22px rgba(139,92,246,.55)}
+.logo::after{content:"";width:12px;height:12px;border-radius:50%;background:var(--bg)}
+.brand h1{font-size:16px;margin:0;letter-spacing:.06em}
+.brand small{color:var(--muted);display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.ctl{display:flex;align-items:center;gap:8px}
+.ctl label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+#env{max-width:300px}
+.legend:empty,#layerChips:empty,#crumbs:empty{display:none!important}
+.legend.min .row:not(:first-child){display:none}
+.legend .row:first-child{cursor:pointer}
+select,.search{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:7px 10px;outline:none}
+select:focus,.search:focus{border-color:var(--nb)}
+.btn{background:linear-gradient(135deg,var(--job),#6d28d9);border:0;border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:600;box-shadow:0 4px 14px rgba(139,92,246,.35)}
+.btn:hover{filter:brightness(1.15)}
+a.btn{color:#fff;text-decoration:none;display:inline-block}
+.btn.ghost{background:var(--bg2);border:1px solid var(--line);box-shadow:none;font-weight:500}
+.btn.on{border-color:var(--nb);color:var(--nb)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:none}
+.dot.success{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.failed{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+.dot.running{background:var(--run);box-shadow:0 0 8px var(--run);animation:pulse 1.2s infinite}
+.dot.cancelled{background:var(--warn)}
+.dot.unknown{background:transparent;border:1px dashed var(--muted)}
+@keyframes pulse{50%{transform:scale(1.6);opacity:.6}}
+
+/* ---------- KPI strip ---------- */
+.kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px}
+.kpi{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;overflow:hidden}
+.kpi::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--c,var(--job))}
+.kpi::after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;background:var(--c,var(--job));opacity:.10}
+.kpi .v{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.kpi .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+.kpi .s{color:var(--dim);font-size:11px}
+
+/* ---------- Main ---------- */
+.main{display:grid;grid-template-columns:280px 1fr 360px;gap:10px;min-height:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.ph h2{font-size:12px;margin:0;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-right:auto}
+.scroll{overflow-y:auto;overflow-x:hidden;flex:1;min-height:0}
+.scroll::-webkit-scrollbar{width:8px}.scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line)}
+.chip{padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);cursor:pointer;font-size:11px;color:var(--muted);display:inline-flex;gap:5px;align-items:center;user-select:none}
+.chip.on{color:var(--text);border-color:var(--c,var(--nb));background:color-mix(in srgb,var(--c,var(--nb)) 18%,var(--bg2))}
+
+.jobrow{padding:9px 12px;border-bottom:1px solid rgba(37,51,107,.5);cursor:pointer;display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center}
+.jobrow:hover{background:rgba(139,92,246,.10)}
+.jobrow.sel{background:rgba(139,92,246,.22);box-shadow:inset 3px 0 var(--job)}
+.jobrow .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.jobrow .m{grid-column:2;color:var(--dim);font-size:11px;display:flex;gap:8px;align-items:center}
+.runbar{display:flex;gap:2px}
+.runbar i{width:7px;height:10px;border-radius:2px;background:var(--idle);display:block}
+.runbar i.success{background:var(--ok)}.runbar i.failed{background:var(--bad)}.runbar i.running{background:var(--run)}.runbar i.cancelled{background:var(--warn)}
+
+/* ---------- Graph ---------- */
+.stage{position:relative}
+#cy,#cyTask{position:absolute;inset:0}
+#cyTask{display:none}
+.overlay{position:absolute;z-index:5;pointer-events:none}
+.overlay>*{pointer-events:auto}
+.legend{left:12px;bottom:12px;background:rgba(13,20,48,.85);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;font-size:11px}
+.legend .row{display:flex;align-items:center;gap:7px;color:var(--muted)}
+.sw{width:12px;height:12px;border-radius:3px;flex:none}
+.ln{width:20px;height:0;border-top:2px solid;flex:none}
+.toolbar{right:12px;top:12px;display:flex;gap:6px}
+.crumbs{left:12px;top:12px;display:flex;gap:8px;align-items:center}
+.crumbs .pill{background:rgba(13,20,48,.85)}
+.empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;z-index:4}
+.loader{width:54px;height:54px;border-radius:50%;margin:0 auto 14px;background:conic-gradient(var(--job),var(--nb),var(--tbl),var(--pl),var(--file),var(--job));-webkit-mask:radial-gradient(circle,transparent 55%,#000 56%);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(1turn)}}
+.tip{position:absolute;z-index:9;pointer-events:none;background:rgba(7,11,26,.95);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;max-width:340px;display:none;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.tip b{display:block;margin-bottom:2px}
+.tip span{color:var(--muted)}
+
+/* ---------- View tabs ---------- */
+.tabs{left:50%;top:12px;transform:translateX(-50%);display:flex;gap:4px;background:rgba(13,20,48,.9);border:1px solid var(--line);border-radius:12px;padding:4px}
+.tab{background:transparent;border:0;border-radius:9px;padding:7px 14px;cursor:pointer;color:var(--muted);font-weight:600;display:flex;gap:7px;align-items:center}
+.tab:hover{color:var(--text)}
+.tab.on{background:linear-gradient(135deg,var(--c),color-mix(in srgb,var(--c) 55%,#000));color:#fff;box-shadow:0 4px 14px color-mix(in srgb,var(--c) 45%,transparent)}
+.tab .badge{background:rgba(255,255,255,.2);border-radius:999px;padding:0 7px;font-size:11px}
+.crumbs{top:62px!important}
+#cyDeps{position:absolute;inset:0;display:none}
+.depsum{right:12px;top:62px;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:50%}
+.kpi.click{cursor:pointer;transition:transform .12s,border-color .12s}.kpi.click:hover{border-color:var(--c);transform:translateY(-2px)}
+.kpi.active{border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 6px 22px color-mix(in srgb,var(--c) 35%,transparent)}
+.catsearch{width:100%;margin-bottom:10px}
+.grp{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 5px;display:flex;gap:6px;align-items:center;cursor:pointer}
+.grp:hover{color:var(--text)}
+.sub{display:block;color:var(--dim);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.backlink{color:var(--nb);cursor:pointer;font-size:12px;display:inline-block;margin-bottom:8px}
+
+/* ---------- Live view ---------- */
+#live{position:absolute;inset:0;display:none;overflow:auto;padding:70px 18px 18px}
+.livehead{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.lstat{flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;border-left:4px solid var(--c)}
+.lstat .v{font-size:26px;font-weight:700}.lstat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.card{background:linear-gradient(160deg,rgba(59,130,246,.16),var(--bg2) 60%);border:1px solid rgba(59,130,246,.45);border-radius:14px;padding:14px;position:relative;overflow:hidden}
+.card.queued{background:linear-gradient(160deg,rgba(245,158,11,.14),var(--bg2) 60%);border-color:rgba(245,158,11,.45)}
+.card.failing{background:linear-gradient(160deg,rgba(239,68,68,.18),var(--bg2) 60%);border-color:rgba(239,68,68,.55)}
+.card h5{margin:0 0 4px;font-size:14px;cursor:pointer}.card h5:hover{color:var(--nb)}
+.card .meta{color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
+.bar{height:8px;border-radius:99px;background:#1e2a5a;margin:12px 0 6px;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--run),var(--nb));position:relative}
+.bar>i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);animation:shine 1.6s infinite}
+@keyframes shine{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.tchips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.tchip{font-size:11px;padding:2px 8px;border-radius:6px;background:rgba(59,130,246,.25);border:1px solid rgba(59,130,246,.5)}
+.tchip.bad{background:rgba(239,68,68,.2);border-color:rgba(239,68,68,.5)}
+.tchip.dep{background:rgba(251,146,60,.15);border-color:rgba(251,146,60,.5);cursor:pointer}
+.tchip.dep:hover{background:rgba(251,146,60,.3)}
+.quiet{text-align:center;padding:40px 20px;color:var(--muted)}
+.quiet .big{font-size:44px;margin-bottom:6px}
+.recent .it{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center}
+
+/* ---------- Detail ---------- */
+.detail{padding:14px}
+.detail h3{margin:0 0 4px;font-size:16px;word-break:break-word}
+.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--c);color:#0b1020}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin:12px 0;font-size:12px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-word}
+.sec{margin-top:16px}
+.sec h4{margin:0 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.list a,.list div.it{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:var(--bg2);margin-bottom:4px;color:var(--text);text-decoration:none;cursor:pointer;font-size:12px}
+.list a:hover,.list div.it:hover{background:var(--panel2)}
+.list .k{color:var(--dim);font-size:10px;text-transform:uppercase;margin-left:auto;white-space:nowrap}
+a.ext{color:var(--nb);text-decoration:none}a.ext:hover{text-decoration:underline}
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.feed .it{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.feed .t{color:var(--dim);font-size:11px;white-space:nowrap}
+.donut{display:flex;gap:16px;align-items:center;margin:4px 0 8px}
+.donut svg{flex:none}
+.err{margin:14px;padding:12px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fecaca;font-size:12px;white-space:pre-wrap}
+code{background:var(--bg2);padding:1px 5px;border-radius:5px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Top bar -->
+  <header class="top">
+    <div class="brand">
+      <div class="logo"></div>
+      <div><h1>JOB CONSTELLATION</h1><small>Databricks Control Centre</small></div>
+    </div>
+    <div class="ctl">
+      <label for="env">Environment</label>
+      <select id="env"></select>
+      <span class="pill" id="conn"><span class="dot"></span><span>not connected</span></span>
+    </div>
+    <div class="ctl">
+      <button class="btn ghost on" id="scanBtn" title="Parse notebook source for %run, dbutils.notebook.run and table reads/writes">Deep scan: on</button>
+      <button class="btn ghost" id="autoBtn" title="Auto refresh every 60s">Auto: off</button>
+      <button class="btn" id="loadBtn">Load</button>
+      <div style="position:relative" id="shareWrap">
+        <button class="btn ghost" id="shareBtn" style="border-color:#34d399;color:#6ee7b7">⇪ Share</button>
+        <div id="sharePop" style="display:none;position:absolute;right:0;top:44px;z-index:50;width:300px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 14px 40px rgba(0,0,0,.5)">
+          <div style="font-weight:600;margin-bottom:4px">Download a portable snapshot</div>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:10px">One HTML file that opens anywhere, with no login or server. Fully clickable, frozen at the time you export.</div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:12px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="redactChk" checked> Hide email addresses</label>
+          <button class="btn" id="exportBtn" style="width:100%">Download .html</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- KPIs -->
+  <section class="kpis" id="kpis"></section>
+
+  <!-- Main -->
+  <section class="main">
+    <aside class="panel">
+      <div class="ph"><h2>Jobs</h2><span class="pill" id="jobCount">0</span></div>
+      <div style="padding:8px 12px;border-bottom:1px solid var(--line)"><input class="search" id="search" placeholder="Search jobs, notebooks, tables…" style="width:100%" /></div>
+      <div class="chips" id="healthChips"></div>
+      <div class="scroll" id="jobList"></div>
+    </aside>
+
+    <main class="panel stage" id="stage">
+      <div id="cy"></div>
+      <div id="cyTask"></div>
+      <div id="cyDeps"></div>
+      <div id="live"></div>
+      <div class="overlay tabs" id="tabs">
+        <button class="tab on" data-v="map" style="--c:#8b5cf6">✦ Constellation</button>
+        <button class="tab" data-v="deps" style="--c:#fb923c">⇄ Dependencies <span class="badge" id="depBadge">0</span></button>
+        <button class="tab" data-v="live" style="--c:#3b82f6">● Live <span class="badge" id="liveBadge">0</span></button>
+      </div>
+      <div class="overlay depsum" id="depsum"></div>
+      <div class="overlay legend" id="depLegend" style="display:none">
+        <div class="row" style="color:var(--text);font-weight:600">Dependencies</div>
+        <div class="row"><span class="sw" style="background:linear-gradient(135deg,#f59e0b,#db2777)"></span>Selected job</div>
+        <div class="row"><span class="sw" style="background:#0e7490"></span>Upstream (it depends on these)</div>
+        <div class="row"><span class="sw" style="background:#9d174d"></span>Downstream (these depend on it)</div>
+        <div class="row"><span class="sw" style="background:#7c2d12"></span>Both (circular)</div>
+        <div class="row"><span class="ln" style="border-top:3px solid #ff4d9d"></span>▶ Runs it directly (run_job)</div>
+        <div class="row"><span class="ln" style="border-top:3px dashed #fb923c"></span>⛁ Reads a table it writes</div>
+        <div class="row" style="color:var(--dim)">Click a job to trace · Esc to go back</div>
+      </div>
+      <div class="overlay crumbs" id="crumbs"></div>
+      <div class="overlay toolbar">
+        <select id="layoutSel" title="Layout">
+          <option value="dagre-LR">Flow →</option>
+          <option value="dagre-TB">Flow ↓</option>
+          <option value="cose">Organic</option>
+          <option value="concentric">Hub</option>
+        </select>
+        <button class="btn ghost" id="fitBtn">Fit</button>
+        <button class="btn ghost" id="isoBtn" title="Hide jobs with no connections">Hide isolated</button>
+      </div>
+      <div class="overlay legend" id="legend"></div>
+      <div class="chips overlay" id="layerChips" style="left:50%;transform:translateX(-50%);bottom:12px;background:rgba(13,20,48,.85);border:1px solid var(--line);border-radius:12px"></div>
+      <div class="empty" id="empty"><div><div style="font-size:40px">✦</div><div style="font-size:15px;color:var(--text);margin:6px 0">Pick an environment and press <b>Load</b></div><div>Jobs, tasks, notebooks and the links between them will appear here.</div></div></div>
+      <div class="tip" id="tip"></div>
+    </main>
+
+    <aside class="panel">
+      <div class="ph"><h2 id="detailTitle">Mission feed</h2><button class="btn ghost" id="clearSel" style="display:none;padding:4px 10px">✕</button></div>
+      <div class="scroll" id="detail"></div>
+    </aside>
+  </section>
+</div>
+
+<!--SNAPSHOT-DATA-->
+<script>
+if(window.SNAPSHOT){
+  const S = window.SNAPSHOT, T0 = S.taken_at;
+  Date.now = () => T0;                       // all "x ago" values are relative to the snapshot
+  const resp = o => new Response(JSON.stringify(o), {status:200, headers:{'content-type':'application/json'}});
+  window.fetch = async (u) => { const url = new URL(u, 'http://snapshot.local'), p = url.pathname;
+    if(p==='/api/environments') return resp(S.environments);
+    if(p==='/api/check') return resp(S.check);
+    if(p==='/api/graph') return resp(S.graph);
+    if(p==='/api/active') return resp(S.active);
+    if(p==='/api/run') return resp(S.runs[url.searchParams.get('run_id')] || {tasks:{}});
+    return new Response('{}', {status:404}); };
+  document.addEventListener('DOMContentLoaded', () => {
+    ['#loadBtn','#scanBtn','#autoBtn','#shareWrap'].forEach(q => { const el = document.querySelector(q); if(el) el.style.display='none'; });
+    const tag = document.createElement('span'); tag.className='pill'; tag.style.cssText='color:#6ee7b7;border-color:#34d399';
+    tag.textContent = `📸 Snapshot · ${new Date(T0).toLocaleString()}`; document.querySelector('.top').appendChild(tag);
+  });
+}
+cytoscape.use(cytoscapeDagre);
+const $ = s => document.querySelector(s);
+const C = {job:'#8b5cf6',notebook:'#22d3ee',table:'#34d399',file:'#f472b6',pipeline:'#fbbf24',
+  ok:'#22c55e',bad:'#ef4444',run:'#3b82f6',warn:'#f59e0b',idle:'#64748b',link:'#ff4d9d',text:'#e8ecff',muted:'#8c97c9'};
+const HEALTH = {success:C.ok,failed:C.bad,running:C.run,cancelled:C.warn,idle:C.idle,unknown:C.muted};
+const EDGE = {
+  triggers_job:{c:C.link,w:4,s:'solid',name:'Job triggers job'},
+  runs_notebook:{c:C.notebook,w:2,s:'solid',name:'Job runs notebook'},
+  calls_notebook:{c:'#facc15',w:2.5,s:'dashed',name:'Notebook calls notebook'},
+  runs_file:{c:C.file,w:1.5,s:'solid',name:'Job runs file'},
+  runs_pipeline:{c:C.pipeline,w:2,s:'solid',name:'Job runs pipeline'},
+  writes_table:{c:C.table,w:2,s:'solid',name:'Writes table'},
+  reads_table:{c:'#6ee7b7',w:1.2,s:'dotted',name:'Reads table'},
+  table_trigger:{c:'#a3e635',w:3,s:'dashed',name:'Table update triggers job'},
+  data_dependency:{c:'#fb923c',w:3,s:'dashed',name:'Job depends on job (via table)'},
+};
+const TASK_C = {notebook:C.notebook,run_job:C.link,pipeline:C.pipeline,spark_python:C.file,python_wheel:C.file,sql:'#fb923c',dbt:'#f97316',condition:'#facc15',for_each:'#a78bfa',spark_jar:'#f87171',dashboard:'#60a5fa',other:C.idle};
+
+const state = {data:null, layers:{job:true,notebook:true,table:true,file:false,pipeline:true}, health:new Set(), selected:null,
+  scan:true, auto:null, hideIso:false, view:'map', taskJob:null};
+let cy, cyTask, cyDeps;
+const DEP_KINDS = new Set(['triggers_job','data_dependency']);
+state.view='map'; state.prevView='map'; state.depFocus=null; state.depTrail=[]; state.live=null; state.liveTimer=null;
+
+/* ---------------- helpers ---------------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ago = ms => { if(!ms) return '—'; const s=(Date.now()-ms)/1000; if(s<60) return `${s|0}s ago`; if(s<3600) return `${s/60|0}m ago`; if(s<86400) return `${s/3600|0}h ago`; return `${s/86400|0}d ago`; };
+const dur = ms => { if(!ms) return '—'; const s=ms/1000; if(s<60) return `${s.toFixed(0)}s`; if(s<3600) return `${(s/60).toFixed(1)}m`; return `${(s/3600).toFixed(1)}h`; };
+const runHealth = r => { if(!r) return 'idle'; if(['RUNNING','PENDING','QUEUED','BLOCKED','WAITING_FOR_RETRY'].includes(r.life)) return 'running';
+  if(r.result==='SUCCESS') return 'success'; if(['FAILED','TIMEDOUT','INTERNAL_ERROR','UPSTREAM_FAILED'].includes(r.result)) return 'failed'; if(r.result) return 'cancelled'; return 'idle'; };
+const taskHealth = t => ['BLOCKED','PENDING','WAITING_FOR_RETRY'].includes(t?.life) ? 'waiting' : runHealth(t);
+const shortLabel = (s,n=34) => s.length>n ? s.slice(0,n-1)+'…' : s;
+const midLabel = (s,n=30) => s.length>n ? s.slice(0,10)+'…'+s.slice(-(n-11)) : s;
+const cleanName = s => String(s).replace(/^\[[^\]]+\]\s*/, '');
+const sched = s => !s ? 'Manual' : s.type==='cron' ? `Cron ${s.expr}${s.tz?' ('+s.tz+')':''}` : s.type==='table_update' ? `On table update (${s.tables.length})` :
+  s.type==='file_arrival' ? `File arrival ${s.url}` : s.type==='continuous' ? 'Continuous' : s.expr || s.type;
+
+/* ---------------- environments ---------------- */
+async function loadEnvs(){
+  const r = await fetch('/api/environments').then(r=>r.json());
+  const sel = $('#env');
+  sel.innerHTML = r.environments.map(e => `<option value="${esc(e.name)}">${e.fevm?'★ ':''}${esc(e.name)}</option>`).join('');
+  const saved = localStorage.getItem('jc-env');
+  const pref = saved && r.environments.find(e=>e.name===saved) ? saved
+    : (r.environments.find(e=>e.name==='fevm-serverless-stable-4cirt0')||r.environments[0])?.name;
+  if(pref) sel.value = pref;
+  if(r.app_mode) sel.disabled = true;
+  if(pref) load();
+}
+async function checkConn(profile){
+  setConn('running','connecting…');
+  const r = await fetch(`/api/check?profile=${encodeURIComponent(profile)}`).then(r=>r.json());
+  if(r.ok) setConn('success', window.SNAPSHOT ? `${profile}` : r.user); else setConn('failed','auth failed');
+  return r;
+}
+function setConn(h, txt){ $('#conn').innerHTML = `<span class="dot ${h}"></span><span>${esc(txt)}</span>`; }
+
+/* ---------------- load ---------------- */
+async function load(refresh=false){
+  const profile = $('#env').value; if(!profile) return;
+  localStorage.setItem('jc-env', profile);
+  $('#empty').style.display='grid';
+  $('#empty').innerHTML = `<div><div class="loader"></div><div style="font-size:15px;color:var(--text)">Mapping <b>${esc(profile)}</b>…</div><div>${state.scan?'Listing jobs, recent runs and scanning notebook source':'Listing jobs and recent runs'}</div></div>`;
+  const chk = await checkConn(profile);
+  if(!chk.ok){ showError(`Could not authenticate to "${profile}".\n\n${chk.error}\n\nFix with:\n  databricks auth login --profile ${profile}`); return; }
+  try{
+    const res = await fetch(`/api/graph?profile=${encodeURIComponent(profile)}&scan=${state.scan}&refresh=${refresh}`);
+    if(!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    state.data = await res.json();
+  }catch(e){ showError(String(e.message||e)); return; }
+  $('#empty').style.display='none';
+  state.selected=null; state.depFocus=null; state.depTrail=[]; state.live=null;
+  renderAll();
+  setView(state.view==='tasks' ? 'map' : state.view);
+  pollLive();
+}
+function showError(msg){
+  $('#empty').style.display='grid';
+  $('#empty').innerHTML = `<div class="err" style="max-width:560px;text-align:left">${esc(msg)}</div>`;
+}
+
+/* ---------------- render ---------------- */
+function renderAll(){ renderKpis(); renderChips(); renderJobList(); renderGraph(); renderDetail(); renderLegend(); }
+
+function renderKpis(){
+  const s = state.data.stats;
+  const rate = s.runs_24h ? Math.round(100*s.success_24h/s.runs_24h)+'%' : '—';
+  const k = [
+    ['Jobs', s.jobs, `${s.scheduled} scheduled`, C.job, 'jobs'],
+    ['Tasks', s.tasks, 'across all jobs', '#a78bfa', 'tasks'],
+    ['Notebooks', s.notebooks, `${s.shared_notebooks} shared · ${s.scanned_notebooks} scanned`, C.notebook, 'notebooks'],
+    ['Job → Job', s.job_links, 'run_job links', C.link, 'links'],
+    ['Dependencies', s.job_links + (s.data_deps||0), `${s.job_links} direct · ${s.data_deps||0} via tables · ${s.notebook_links} nb calls`, '#fb923c', 'deps'],
+    ['Tables', s.tables, 'touched by notebooks', C.table, 'tables'],
+    ['Success 24h', rate, `${s.success_24h}/${s.runs_24h} runs · ${s.failed_24h} failed`, s.failed_24h? C.bad : C.ok, 'runs'],
+    ['Running now', state.live ? state.live.active.length : s.running, state.live ? `live · ${ago(state.live.generated_at)}` : `built in ${s.build_seconds}s`, C.run, 'live'],
+  ];
+  const activeKpi = state.view==='live' ? 'live' : state.catalog;
+  $('#kpis').innerHTML = k.map(([l,v,sub,c,key]) => `<div class="kpi click ${activeKpi===key?'active':''}" data-kpi="${key}" title="Show ${l.toLowerCase()}" style="--c:${c}"><div class="l">${l} ›</div><div class="v">${v}</div><div class="s">${esc(sub)}</div></div>`).join('');
+  $('#kpis').querySelectorAll('[data-kpi]').forEach(el => el.onclick = () => kpiClick(el.dataset.kpi));
+  $('#depBadge').textContent = s.job_links + (s.data_deps||0);
+}
+
+function jobs(){ return state.data.nodes.filter(n=>n.type==='job'); }
+
+function renderChips(){
+  const counts = {}; jobs().forEach(j => counts[j.health]=(counts[j.health]||0)+1);
+  $('#healthChips').innerHTML = ['success','failed','running','cancelled','idle'].filter(h=>counts[h]).map(h =>
+    `<span class="chip ${state.health.has(h)?'on':''}" style="--c:${HEALTH[h]}" data-h="${h}"><span class="dot ${h}"></span>${h} ${counts[h]}</span>`).join('');
+  $('#healthChips').querySelectorAll('.chip').forEach(el => el.onclick = () => {
+    const h = el.dataset.h; state.health.has(h) ? state.health.delete(h) : state.health.add(h); renderChips(); renderJobList(); applyFilters(); });
+
+  const lc = {}; state.data.nodes.forEach(n => lc[n.type]=(lc[n.type]||0)+1);
+  const names = {job:'Jobs',notebook:'Notebooks',table:'Tables',file:'Files',pipeline:'Pipelines'};
+  $('#layerChips').innerHTML = Object.keys(names).filter(t=>lc[t]).map(t =>
+    `<span class="chip ${state.layers[t]?'on':''}" style="--c:${C[t]}" data-t="${t}"><span class="sw" style="background:${C[t]};width:9px;height:9px"></span>${names[t]} ${lc[t]}</span>`).join('');
+  $('#layerChips').querySelectorAll('.chip').forEach(el => el.onclick = () => {
+    state.layers[el.dataset.t] = !state.layers[el.dataset.t]; renderChips(); renderGraph(); });
+}
+
+function renderJobList(){
+  const q = $('#search').value.toLowerCase();
+  const list = jobs().filter(j => !j.ghost)
+    .filter(j => !state.health.size || state.health.has(j.health))
+    .filter(j => !q || j.label.toLowerCase().includes(q) || (j.tasks||[]).some(t => (t.task_key+' '+(t.ref||'')).toLowerCase().includes(q)))
+    .sort((a,b)=> (b.runs?.[0]?.start||0)-(a.runs?.[0]?.start||0));
+  $('#jobCount').textContent = list.length;
+  $('#jobList').innerHTML = list.map(j => `
+    <div class="jobrow ${state.selected===j.id?'sel':''}" data-id="${esc(j.id)}">
+      <span class="dot ${j.health}"></span><span class="n" title="${esc(j.label)}">${esc(j.label)}</span>
+      <div class="m"><span class="runbar">${(j.runs||[]).slice(0,10).reverse().map(r=>`<i class="${runHealth(r)}" title="${esc((r.result||r.life||'')+' · '+ago(r.start))}"></i>`).join('')}</span>
+      <span>${j.task_count} tasks</span><span>${ago(j.runs?.[0]?.start)}</span></div>
+    </div>`).join('') || `<div style="padding:16px;color:var(--muted)">No jobs match.</div>`;
+  $('#jobList').querySelectorAll('.jobrow').forEach(el => el.onclick = () => select(el.dataset.id, true));
+}
+
+/* ---------------- main graph ---------------- */
+function nodeStyle(){
+  return [
+    {selector:'node', style:{'label':'data(short)','color':C.text,'font-size':12,'min-zoomed-font-size':5,'text-valign':'bottom','text-margin-y':6,'text-wrap':'wrap','text-max-width':150,
+      'text-outline-color':'#070b1a','text-outline-width':3,'background-color':'data(color)','border-width':0,'width':26,'height':26,'transition-property':'opacity, border-width','transition-duration':'200ms'}},
+    {selector:'node[type="job"]', style:{'shape':'round-rectangle','height':38,'border-width':4,'border-color':'data(hcolor)','font-size':15,'font-weight':600,
+      'background-fill':'linear-gradient','background-gradient-stop-colors':'#a78bfa #6d28d9','background-gradient-direction':'to-bottom-right',
+      'label':'data(short)','text-valign':'center','text-halign':'center','text-margin-y':0,'width':'label','padding':14,'text-max-width':200,'text-outline-color':'#3b1f8a','text-outline-width':2}},
+    {selector:'node[type="job"][?ghost]', style:{'border-style':'dashed','background-gradient-stop-colors':'#334155 #1e293b','opacity':.7}},
+    {selector:'node[type="job"][health="running"]', style:{'underlay-color':C.run,'underlay-opacity':.35,'underlay-padding':8,'underlay-shape':'round-rectangle'}},
+    {selector:'node[type="job"][health="failed"]', style:{'underlay-color':C.bad,'underlay-opacity':.3,'underlay-padding':7,'underlay-shape':'round-rectangle'}},
+    {selector:'node[type="notebook"]', style:{'shape':'ellipse','width':30,'height':30,'border-width':2,'border-color':'#a5f3fc'}},
+    {selector:'node[type="notebook"][?shared]', style:{'width':40,'height':40,'border-width':4,'border-color':'#facc15'}},
+    {selector:'node[type="notebook"][?called_only]', style:{'border-style':'dashed'}},
+    {selector:'node[type="table"]', style:{'shape':'barrel','width':30,'height':24,'border-width':2,'border-color':'#a7f3d0'}},
+    {selector:'node[type="file"]', style:{'shape':'tag','width':22,'height':22}},
+    {selector:'node[type="pipeline"]', style:{'shape':'hexagon','width':38,'height':34,'border-width':2,'border-color':'#fde68a'}},
+    {selector:'edge', style:{'curve-style':'bezier','width':'data(w)','line-color':'data(color)','target-arrow-color':'data(color)','target-arrow-shape':'triangle','arrow-scale':1.1,
+      'line-style':'data(ls)','opacity':.85,'transition-property':'opacity','transition-duration':'200ms'}},
+    {selector:'edge[kind="triggers_job"]', style:{'label':'data(label)','font-size':9,'color':'#ffc2dd','text-outline-color':'#070b1a','text-outline-width':2,'text-rotation':'autorotate'}},
+    {selector:'.faded', style:{'opacity':.08}},
+    {selector:'.hl', style:{'opacity':1,'z-index':10}},
+    {selector:'node.hl', style:{'border-color':'#ffffff','border-width':4}},
+    {selector:'node.match', style:{'underlay-color':'#facc15','underlay-opacity':.5,'underlay-padding':10}},
+    {selector:'node:selected', style:{'underlay-color':'#ffffff','underlay-opacity':.35,'underlay-padding':10}},
+    {selector:'.hidden', style:{'display':'none'}},
+  ];
+}
+
+function renderGraph(){
+  const d = state.data; if(!d) return;
+  const vis = new Set(d.nodes.filter(n => state.layers[n.type]).map(n=>n.id));
+  const els = [];
+  d.nodes.forEach(n => { if(!vis.has(n.id)) return;
+    els.push({data:{...n, id:n.id, short:shortLabel(n.type==='job'?cleanName(n.label):n.label, n.type==='job'?44:30), color:C[n.type]||C.idle, hcolor:HEALTH[n.health]||C.idle}}); });
+  d.edges.forEach(e => { if(!vis.has(e.source)||!vis.has(e.target)) return; const st = EDGE[e.kind]||{c:C.muted,w:1,s:'solid'};
+    els.push({data:{...e, color:st.c, w:st.w, ls:st.s, label:e.label||''}}); });
+  if(cy) cy.destroy();
+  cy = cytoscape({container:$('#cy'), elements:els, style:nodeStyle(), wheelSensitivity:.25, minZoom:.1, maxZoom:3});
+  cy.on('tap','node', ev => select(ev.target.id(), false));
+  cy.on('dbltap','node[type="job"]', ev => openTaskView(ev.target.id()));
+  cy.on('tap', ev => { if(ev.target===cy) select(null); });
+  cy.on('mouseover','node', ev => { hover(ev.target); showTip(ev); });
+  cy.on('mouseout','node', () => { if(!state.selected) clearHl(); else highlight(cy.getElementById(state.selected)); $('#tip').style.display='none'; });
+  cy.on('mousemove','node', showTip);
+  applyFilters(); runLayout();
+  if(state.selected && cy.getElementById(state.selected).length) highlight(cy.getElementById(state.selected));
+}
+
+function runLayout(){
+  if(!cy) return;
+  const v = $('#layoutSel').value;
+  const vis = cy.elements(':visible');
+  let opts;
+  if(v.startsWith('dagre')) opts = {name:'dagre', rankDir:v.split('-')[1], nodeSep:22, rankSep:150, edgeSep:10, animate:true, animationDuration:450};
+  else if(v==='cose') opts = {name:'cose', animate:true, animationDuration:600, nodeRepulsion:9000, idealEdgeLength:90, gravity:.4, nodeDimensionsIncludeLabels:true};
+  else opts = {name:'concentric', concentric:n=>n.degree()+(n.data('type')==='job'?6:0), levelWidth:()=>3, minNodeSpacing:30, animate:true};
+  vis.layout({...opts, fit:true, padding:50}).run();
+}
+
+function applyFilters(){
+  if(!cy) return;
+  cy.batch(() => {
+    cy.elements().removeClass('hidden match');
+    if(state.health.size) cy.nodes('[type="job"]').forEach(n => { if(!state.health.has(n.data('health'))) n.addClass('hidden'); });
+    if(state.hideIso) cy.nodes().forEach(n => { if(n.connectedEdges(':visible').length===0) n.addClass('hidden'); });
+    // remove orphans created by hiding jobs
+    cy.nodes('[type!="job"]').forEach(n => { if(n.connectedEdges().filter(e => !e.source().hasClass('hidden') && !e.target().hasClass('hidden')).length===0 && n.connectedEdges().length) n.addClass('hidden'); });
+    const q = $('#search').value.trim().toLowerCase();
+    if(q) cy.nodes().forEach(n => { const t=(n.data('label')+' '+(n.data('path')||'')).toLowerCase(); if(t.includes(q)) n.addClass('match'); });
+  });
+}
+
+function neighbourhood(node){
+  // full upstream + downstream lineage
+  return node.union(node.successors()).union(node.predecessors());
+}
+function highlight(node){
+  if(!node || !node.length) return;
+  const nb = neighbourhood(node);
+  cy.batch(()=>{ cy.elements().addClass('faded').removeClass('hl'); nb.removeClass('faded').addClass('hl'); });
+}
+function hover(node){ highlight(node); }
+function clearHl(){ cy && cy.elements().removeClass('faded hl'); }
+
+function showTip(ev){
+  const n = ev.target.data(), t = $('#tip');
+  let body = '';
+  if(n.type==='job') body = `<span>${n.task_count} tasks · ${sched(n.schedule)}</span><br><span>Last run: ${esc((n.runs?.[0]?.result||n.runs?.[0]?.life||'never'))} ${ago(n.runs?.[0]?.start)}</span>`;
+  else if(n.type==='notebook') body = `<span>${esc(n.path)}</span>${n.used_by_jobs?.length?`<br><span>Used by ${n.used_by_jobs.length} job(s)</span>`:''}`;
+  else body = `<span>${esc(n.full_name||n.path||n.id)}</span>`;
+  t.innerHTML = `<b>${esc(n.label)}</b>${body}<br><span style="color:var(--dim)">${n.type==='job'?'Click to inspect · double-click for task DAG':'Click to inspect lineage'}</span>`;
+  const r = $('#stage').getBoundingClientRect(), p = ev.renderedPosition || ev.target.renderedPosition();
+  t.style.left = Math.min(p.x+16, r.width-350)+'px'; t.style.top = (p.y+16)+'px'; t.style.display='block';
+}
+
+/* ---------------- selection & detail ---------------- */
+function select(id, center){
+  state.selected = id;
+  if(state.view==='tasks' && id) setView(state.prevView==='live' ? 'map' : state.prevView);
+  renderJobList();
+  if(state.view==='deps'){
+    if(id && nodeById(id)?.type==='job') depNavigate(id); else if(!id) depNavigate(null);
+    else { setView('map'); return select(id, center); }
+  }
+  if(cy && state.view==='map'){
+    cy.$(':selected').unselect();
+    if(id){ const n = cy.getElementById(id); if(n.length){ n.select(); highlight(n); if(center) cy.animate({fit:{eles:neighbourhood(n).filter(':visible'), padding:90}},{duration:400}); } }
+    else clearHl();
+  }
+  renderDetail();
+}
+const nodeById = id => state.data.nodes.find(n=>n.id===id);
+
+function linkItem(id, kindLabel){
+  const n = nodeById(id); if(!n) return '';
+  const color = n.type==='job' ? (HEALTH[n.health]||C.idle) : C[n.type];
+  return `<div class="it" data-go="${esc(id)}"><span class="sw" style="background:${color}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.label)}</span><span class="k">${esc(kindLabel)}</span></div>`;
+}
+
+function renderDetail(){
+  const d = state.data, box = $('#detail');
+  $('#clearSel').style.display = (state.selected || state.catalog) ? 'inline-block' : 'none';
+  if(!d){ box.innerHTML=''; return; }
+  if(!state.selected && state.catalog){ return renderCatalog(); }
+  if(!state.selected){ $('#detailTitle').textContent='Mission feed'; box.innerHTML = feedHtml(); bindGo(box); return; }
+  const n = nodeById(state.selected); if(!n){ state.selected=null; return renderDetail(); }
+  $('#detailTitle').textContent = n.type;
+  const out = d.edges.filter(e=>e.source===n.id), inn = d.edges.filter(e=>e.target===n.id);
+  const kindName = k => (EDGE[k]?.name||k);
+  let h = `<div class="detail">${state.catalog?`<span class="backlink" id="backCat">← Back to ${esc(CAT[state.catalog].title.toLowerCase())}</span><br>`:''}<span class="tag" style="--c:${C[n.type]}">${n.type}</span><h3 style="margin-top:8px">${esc(n.label)}</h3>`;
+  if(n.type==='job'){
+    const last = n.runs?.[0];
+    h += `<dl class="kv">
+      <dt>Status</dt><dd><span class="pill"><span class="dot ${n.health}"></span>${esc(n.health)}</span></dd>
+      <dt>Job ID</dt><dd>${esc(n.job_id)}</dd>
+      <dt>Trigger</dt><dd>${esc(sched(n.schedule))}${n.schedule?.paused==='PAUSED'?' <span class="pill">paused</span>':''}</dd>
+      <dt>Tasks</dt><dd>${n.task_count}</dd>
+      <dt>Owner</dt><dd>${esc(n.creator||'—')}</dd>
+      <dt>Run as</dt><dd>${esc(n.run_as||'—')}</dd>
+      ${n.bundle?'<dt>Deployed by</dt><dd>Asset Bundle</dd>':''}
+      ${Object.keys(n.tags||{}).length?`<dt>Tags</dt><dd>${Object.entries(n.tags).map(([k,v])=>`<code>${esc(k)}${v?'='+esc(v):''}</code>`).join(' ')}</dd>`:''}
+      <dt>Last run</dt><dd>${last?`${esc(last.result||last.life)} · ${ago(last.start)} · ${dur(last.duration)}`:'never'}</dd>
+    </dl>`;
+    h += `<div class="actions">${n.url&&!n.ghost?`<a class="btn" href="${esc(n.url)}" target="_blank">Open in Databricks ↗</a>`:''}<button class="btn ghost" id="dagBtn">Task DAG</button><button class="btn ghost" id="depBtn" style="border-color:#fb923c;color:#fdba74">⇄ Dependencies</button><button class="btn ghost" id="focusBtn">Focus lineage</button></div>`;
+    h += depSection(n);
+    if(n.runs?.length) h += `<div class="sec"><h4>Recent runs</h4><div class="list feed">${n.runs.map(r=>`<a href="${esc(r.url||'#')}" target="_blank" class="it"><span class="dot ${runHealth(r)}"></span><span>${esc(r.result||r.life)} <span style="color:var(--dim)">· ${esc(r.trigger||'')}</span></span><span class="t">${ago(r.start)} · ${dur(r.duration)}</span></a>`).join('')}</div></div>`;
+    if(n.tasks?.length) h += `<div class="sec"><h4>Tasks</h4><div class="list">${n.tasks.map(t=>`<div class="it" data-task="${esc(t.task_key)}"><span class="sw" style="background:${TASK_C[t.kind]||C.idle}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.ref||'')}">${esc(t.task_key)}</span><span class="k">${esc(t.kind)}</span></div>`).join('')}</div></div>`;
+  } else {
+    h += `<dl class="kv">${n.path?`<dt>Path</dt><dd>${esc(n.path)}</dd>`:''}${n.full_name?`<dt>Table</dt><dd>${esc(n.full_name)}</dd>`:''}${n.language?`<dt>Language</dt><dd>${esc(n.language)}</dd>`:''}
+      ${n.used_by_jobs?`<dt>Used by</dt><dd>${n.used_by_jobs.length} job(s)${n.shared?' <span class="pill" style="color:#facc15">shared</span>':''}</dd>`:''}
+      ${n.called_only?'<dt>Note</dt><dd>Only reached via %run / notebook.run</dd>':''}
+      ${n.scan_error?`<dt>Scan</dt><dd style="color:#fca5a5">${esc(n.scan_error)}</dd>`:''}</dl>`;
+    h += `<div class="actions">${n.url?`<a class="btn" href="${esc(n.url)}" target="_blank">Open ↗</a>`:''}<button class="btn ghost" id="focusBtn">Focus lineage</button></div>`;
+  }
+  const assetIn = n.type==='job' ? inn.filter(e=>!DEP_KINDS.has(e.kind)) : inn, assetOut = n.type==='job' ? out.filter(e=>!DEP_KINDS.has(e.kind)) : out;
+  if(n.type==='job'){ if(assetIn.length) h += `<div class="sec"><h4>Inputs · ${assetIn.length}</h4><div class="list">${assetIn.map(e=>linkItem(e.source, kindName(e.kind))).join('')}</div></div>`;
+    if(assetOut.length) h += `<div class="sec"><h4>Runs / writes · ${assetOut.length}</h4><div class="list">${assetOut.map(e=>linkItem(e.target, kindName(e.kind))).join('')}</div></div>`; }
+  else if(inn.length) h += `<div class="sec"><h4>Upstream · ${inn.length}</h4><div class="list">${inn.map(e=>linkItem(e.source, kindName(e.kind))).join('')}</div></div>`;
+  if(n.type!=='job' && out.length) h += `<div class="sec"><h4>Downstream · ${out.length}</h4><div class="list">${out.map(e=>linkItem(e.target, kindName(e.kind))).join('')}</div></div>`;
+  h += '</div>';
+  box.innerHTML = h; bindGo(box);
+  $('#dagBtn') && ($('#dagBtn').onclick = () => openTaskView(n.id));
+  $('#backCat') && ($('#backCat').onclick = () => { state.selected=null; if(cy) clearHl(); renderJobList(); renderDetail(); });
+  $('#focusBtn') && ($('#focusBtn').onclick = () => focusLineage(n.id));
+  $('#depBtn') && ($('#depBtn').onclick = () => { setView('deps'); depNavigate(n.id); });
+  box.querySelectorAll('[data-task]').forEach(el => el.onclick = () => openTaskView(n.id, el.dataset.task));
+  box.querySelectorAll('[data-dep]').forEach(el => el.onclick = () => { if(state.view!=='deps') setView('deps'); depNavigate(el.dataset.dep); });
+}
+function bindGo(box){ box.querySelectorAll('[data-go]').forEach(el => el.onclick = () => select(el.dataset.go, true)); }
+
+function feedHtml(){
+  const d = state.data, js = jobs().filter(j=>!j.ghost);
+  const c = {}; js.forEach(j=>c[j.health]=(c[j.health]||0)+1);
+  const order = ['success','failed','running','cancelled','idle'];
+  let acc = 0; const tot = js.length||1, R=34, L=2*Math.PI*R;
+  const arcs = order.filter(k=>c[k]).map(k => { const f=c[k]/tot, s=`<circle r="${R}" cx="45" cy="45" fill="none" stroke="${HEALTH[k]}" stroke-width="12" stroke-dasharray="${f*L} ${L}" stroke-dashoffset="${-acc*L}" transform="rotate(-90 45 45)"/>`; acc+=f; return s; }).join('');
+  const hubs = jobs().map(j => ({j, deg: d.edges.filter(e=>e.source===j.id||e.target===j.id).length})).sort((a,b)=>b.deg-a.deg).slice(0,5);
+  return `<div class="detail">
+    <div class="sec" style="margin-top:0"><h4>Fleet health · last run per job</h4>
+      <div class="donut"><svg width="90" height="90"><circle r="${R}" cx="45" cy="45" fill="none" stroke="#1e2a5a" stroke-width="12"/>${arcs}<text x="45" y="50" text-anchor="middle" fill="#e8ecff" font-size="18" font-weight="700">${js.length}</text></svg>
+      <div>${order.filter(k=>c[k]).map(k=>`<div class="pill" style="margin:2px 0;display:flex"><span class="dot ${k}"></span>${k} · ${c[k]}</div>`).join('')}</div></div></div>
+    <div class="sec"><h4>Most connected</h4><div class="list">${hubs.map(h=>linkItem(h.j.id, h.deg+' links')).join('')}</div></div>
+    <div class="sec"><h4>Recent runs</h4><div class="list feed">${d.feed.slice(0,40).map(r=>`<a class="it" href="${esc(r.url||'#')}" target="_blank" title="${esc(r.job)}"><span class="dot ${runHealth(r)}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.job)}</span><span class="t">${ago(r.start)}</span></a>`).join('') || '<div style="color:var(--muted)">No runs yet.</div>'}</div></div>
+    <div class="sec" style="color:var(--dim);font-size:11px">${esc(d.host)}<br>Updated ${new Date(d.generated_at).toLocaleTimeString()}</div>
+  </div>`;
+}
+
+function focusLineage(id){
+  setView('map');
+  const n = cy.getElementById(id); if(!n.length) return;
+  const keep = neighbourhood(n);
+  cy.elements().not(keep).addClass('hidden');
+  keep.layout({name:'dagre', rankDir:'LR', nodeSep:30, rankSep:120, animate:true, fit:true, padding:60}).run();
+  setCrumbs([{t:'Constellation', go:()=>{ applyFilters(); runLayout(); setCrumbs([]); }}, {t:`Lineage: ${shortLabel(n.data('label'),30)}`}]);
+}
+
+/* ---------------- task DAG view ---------------- */
+function openTaskView(jobId, focusTask, runId){
+  const j = nodeById(jobId); if(!j || !j.tasks?.length) return;
+  if(state.view!=='tasks') state.prevView = state.view;
+  setView('tasks'); state.taskJob=jobId; state.taskRun = runId || j.runs?.[0]?.run_id;
+  const els = j.tasks.map(t => ({data:{id:t.task_key, label:shortLabel(t.task_key,36), kind:t.kind, ref:t.ref, color:TASK_C[t.kind]||C.idle}}));
+  const keys = new Set(j.tasks.map(t=>t.task_key));
+  j.tasks.forEach(t => t.depends_on.forEach(dp => { if(keys.has(dp.task_key)) els.push({data:{id:`${dp.task_key}->${t.task_key}`, source:dp.task_key, target:t.task_key,
+    label: dp.outcome ? (dp.outcome==='true'?'✓ true':'✗ false') : (t.run_if && t.run_if!=='ALL_SUCCESS' ? t.run_if.toLowerCase().replace(/_/g,' ') : ''),
+    color: dp.outcome==='false' || /FAIL/.test(t.run_if||'') ? C.bad : dp.outcome==='true' ? C.ok : '#7c8bd6'}}); }));
+  if(cyTask) cyTask.destroy();
+  cyTask = cytoscape({container:$('#cyTask'), elements:els, wheelSensitivity:.25, style:[
+    {selector:'node', style:{'shape':'round-rectangle','width':'label','height':38,'padding':14,'label':'data(label)','text-valign':'center','text-halign':'center','color':'#0b1020','font-size':14,'font-weight':700,
+      'background-color':'data(color)','border-width':3,'border-color':'rgba(255,255,255,.55)'}},
+    {selector:'node[rs="success"]', style:{'border-color':C.ok,'border-width':5}},
+    {selector:'node[rs="failed"]', style:{'border-color':C.bad,'border-width':6,'underlay-color':C.bad,'underlay-opacity':.4,'underlay-padding':8}},
+    {selector:'node[rs="running"]', style:{'border-color':C.run,'border-width':6,'underlay-color':C.run,'underlay-opacity':.4,'underlay-padding':8}},
+    {selector:'node[rs="cancelled"]', style:{'border-color':C.warn,'border-width':5,'opacity':.75}},
+    {selector:'node[rs="waiting"]', style:{'border-color':'#94a3b8','border-style':'dashed','border-width':4,'opacity':.55}},
+    {selector:'node[kind="condition"]', style:{'shape':'diamond','width':60,'height':60,'padding':0,'text-valign':'bottom','text-margin-y':6,'color':C.text,'text-outline-color':'#070b1a','text-outline-width':2}},
+    {selector:'node[kind="run_job"]', style:{'border-width':4,'border-color':'#fff','shape':'cut-rectangle'}},
+    {selector:'edge', style:{'curve-style':'bezier','width':2,'opacity':.8,'line-color':'data(color)','target-arrow-color':'data(color)','target-arrow-shape':'triangle',
+      'label':'data(label)','font-size':10,'color':C.text,'text-outline-color':'#070b1a','text-outline-width':2,'text-rotation':'autorotate'}},
+    {selector:'node:selected', style:{'underlay-color':'#fff','underlay-opacity':.4,'underlay-padding':8}},
+  ]});
+  cyTask.layout({name:'dagre', rankDir:'LR', nodeSep:30, rankSep:90, fit:true, padding:40}).run();
+  paintTaskRun(j, state.taskRun);
+  cyTask.on('tap','node', ev => {
+    const t = ev.target.data();
+    if(t.kind==='run_job' && t.ref) return select(`job:${t.ref}`, true);
+    if(t.kind==='notebook' && t.ref){ const id = 'nb:'+t.ref.replace(/^\/Workspace(?=\/)/,''); if(nodeById(id)) return select(id, true); }
+  });
+  cyTask.on('mouseover','node', ev => { const t=ev.target.data(), tip=$('#tip'); tip.innerHTML=`<b>${esc(t.id)}</b><span>${esc(t.kind)}${t.ref?' · '+esc(t.ref):''}</span>${t.rt?`<br><span>Last run: ${esc(t.rt.result||t.rt.life)} · ${dur(t.rt.duration)}</span>${t.rt.message?`<br><span style="color:#fca5a5">${esc(t.rt.message.slice(0,200))}</span>`:''}`:''}${['run_job','notebook'].includes(t.kind)?'<br><span style="color:var(--dim)">Click to jump</span>':''}`;
+    const p=ev.target.renderedPosition(); tip.style.left=(p.x+16)+'px'; tip.style.top=(p.y+16)+'px'; tip.style.display='block'; });
+  cyTask.on('mouseout','node', () => $('#tip').style.display='none');
+  if(focusTask){ const n = cyTask.getElementById(focusTask); n.select(); cyTask.animate({center:{eles:n}, zoom:1.3},{duration:300}); }
+  setCrumbs([{t:'← '+VIEW_NAME[state.prevView], go:backToMap}, {t:`Tasks: ${shortLabel(cleanName(j.label),40)}`}]);
+}
+async function paintTaskRun(j, runId){
+  if(!runId) return;
+  clearTimeout(state.taskPoll);
+  try{
+    const r = await fetch(`/api/run?profile=${encodeURIComponent(state.data.profile)}&run_id=${runId}`).then(r=>r.json());
+    if(state.view!=='tasks' || state.taskJob!==j.id || state.taskRun!==runId || !cyTask) return;
+    cyTask.batch(()=>Object.entries(r.tasks||{}).forEach(([k,t]) => { const n=cyTask.getElementById(k); if(n.length){ n.data('rs', taskHealth(t)); n.data('rt', t); } }));
+    const active = runHealth(r)==='running';
+    setCrumbs([{t:'← '+VIEW_NAME[state.prevView], go:backToMap}, {t:`Tasks: ${shortLabel(cleanName(j.label),40)}`},
+      {t: active ? `● LIVE run · started ${ago(r.start)} · refreshing` : `Run ${ago(r.start)} · ${r.result||r.life||''}`}]);
+    if(active) state.taskPoll = setTimeout(()=>paintTaskRun(j, runId), 8000);
+  }catch(e){ console.warn('run overlay failed', e); }
+}
+setInterval(() => { if(state.view!=='tasks' || !cyTask) return; const on = (Date.now()/700|0)%2;
+  cyTask.nodes('[rs="running"]').style('underlay-opacity', on ? .55 : .15); }, 700);
+const VIEW_NAME = {map:'Constellation', deps:'Dependencies', live:'Live', tasks:'Tasks'};
+function backToMap(){ setView(state.prevView && state.prevView!=='tasks' ? state.prevView : 'map'); }
+
+/* ---------------- KPI catalogues ---------------- */
+const CAT = {
+  jobs:{title:'Jobs'}, tasks:{title:'Tasks'}, notebooks:{title:'Notebooks'}, links:{title:'Job → Job links'},
+  deps:{title:'Dependencies'}, tables:{title:'Tables'}, runs:{title:'Runs · last 24h'},
+};
+function setLayers(on){ Object.keys(state.layers).forEach(k => state.layers[k] = on.includes(k)); renderChips(); renderGraph(); }
+function kpiClick(key){
+  if(key==='live'){ state.catalog=null; setView('live'); renderKpis(); renderDetail(); return; }
+  state.catalog = key; state.catQ = ''; state.selected = null;
+  if(key==='jobs'){ setView('map'); setLayers(['job','pipeline']); }
+  else if(key==='notebooks'){ setView('map'); setLayers(['job','notebook']); }
+  else if(key==='tables'){ setView('map'); setLayers(['job','notebook','file','table']); }
+  else if(key==='links' || key==='deps'){ setView('deps'); depNavigate(null); }
+  else if(state.view==='live' || state.view==='tasks') setView('map');
+  renderKpis(); renderJobList(); renderDetail();
+}
+function catRow({id, dot, sw, name, sub, k, attrs=''}){
+  return `<div class="it" ${attrs} data-cat-id="${esc(id||'')}">${dot?`<span class="dot ${dot}"></span>`:''}${sw?`<span class="sw" style="background:${sw}"></span>`:''}
+    <span style="min-width:0;flex:1"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>${sub?`<span class="sub" title="${esc(sub)}">${esc(sub)}</span>`:''}</span>${k?`<span class="k">${esc(k)}</span>`:''}</div>`;
+}
+function renderCatalog(){
+  const d = state.data, key = state.catalog, box = $('#detail'), q = (state.catQ||'').toLowerCase();
+  const match = (...xs) => !q || xs.join(' ').toLowerCase().includes(q);
+  $('#detailTitle').textContent = CAT[key].title;
+  let rows = '', count = 0;
+  const jobName = id => cleanName(nodeById(id)?.label || id);
+  if(key==='jobs'){
+    const list = jobs().filter(j=>!j.ghost && match(j.label)).sort((a,b)=>(b.runs?.[0]?.start||0)-(a.runs?.[0]?.start||0));
+    count = list.length;
+    rows = list.map(j => catRow({id:j.id, dot:j.health, name:cleanName(j.label), sub:`${j.task_count} tasks · ${sched(j.schedule)} · last run ${ago(j.runs?.[0]?.start)}`, attrs:`data-act="select"`})).join('');
+  } else if(key==='tasks'){
+    jobs().filter(j=>!j.ghost && j.tasks?.length).forEach(j => {
+      const ts = j.tasks.filter(t => match(j.label, t.task_key, t.kind, t.ref||'')); if(!ts.length) return; count += ts.length;
+      rows += `<div class="grp" data-act="dag" data-job="${esc(j.id)}"><span class="dot ${j.health}"></span>${esc(cleanName(j.label))} · ${ts.length} ›</div>`;
+      rows += ts.map(t => catRow({id:j.id, sw:TASK_C[t.kind]||C.idle, name:t.task_key, sub:t.ref||'', k:t.kind, attrs:`data-act="task" data-task="${esc(t.task_key)}"`})).join('');
+    });
+  } else if(key==='notebooks'){
+    const list = d.nodes.filter(n=>n.type==='notebook' && match(n.label, n.path)).sort((a,b)=>(b.used_by_jobs?.length||0)-(a.used_by_jobs?.length||0));
+    count = list.length;
+    rows = list.map(n => { const calls = d.edges.filter(e=>e.source===n.id && e.kind==='calls_notebook').length, users = n.used_by_jobs||[];
+      return catRow({id:n.id, sw:n.shared?'#facc15':C.notebook, name:n.label, sub:n.path, k: users.length ? `${users.length} job${users.length>1?'s':''}${calls?` · ${calls} calls`:''}` : (n.called_only?'called by nb':'—'), attrs:`data-act="select"`}); }).join('');
+  } else if(key==='links' || key==='deps'){
+    const es = d.edges.filter(e => key==='links' ? e.kind==='triggers_job' : DEP_KINDS.has(e.kind)).filter(e => match(nodeById(e.source)?.label, nodeById(e.target)?.label, (e.tables||[]).join(' ')));
+    count = es.length;
+    rows = es.map(e => catRow({id:e.source, sw:EDGE[e.kind].c, name:`${jobName(e.source)}  →  ${jobName(e.target)}`, sub: e.kind==='triggers_job' ? `runs it via task ${e.label}` : `shares ${(e.tables||[]).join(', ')}`, k: e.kind==='triggers_job'?'direct':'via table', attrs:`data-act="dep" data-edge="${esc(e.id)}"`})).join('');
+    if(!es.length) rows = `<div style="color:var(--muted)">None found.</div>`;
+  } else if(key==='tables'){
+    const list = d.nodes.filter(n=>n.type==='table' && match(n.label)).map(n => ({n, w: jobs().filter(j=>(j.writes||[]).includes(n.full_name)), r: jobs().filter(j=>(j.reads||[]).includes(n.full_name))}))
+      .sort((a,b)=>(b.w.length+b.r.length)-(a.w.length+a.r.length));
+    count = list.length;
+    rows = list.map(({n,w,r}) => catRow({id:n.id, sw:C.table, name:n.label, sub:`written by ${w.length ? w.map(j=>cleanName(j.label)).join(', ') : '—'} · read by ${r.length ? r.map(j=>cleanName(j.label)).join(', ') : '—'}`, k:`${w.length}W · ${r.length}R`, attrs:`data-act="select"`})).join('');
+  } else if(key==='runs'){
+    const since = Date.now() - 24*3600e3, sev = r => ({failed:0, running:1, cancelled:2, success:3}[runHealth(r)] ?? 4);
+    const list = d.feed.filter(r => (r.start||0) > since && match(r.job, r.result||'')).sort((a,b)=> sev(a)-sev(b) || b.start-a.start);
+    count = list.length;
+    rows = list.map(r => catRow({id:`job:${r.job_id}`, dot:runHealth(r), name:cleanName(r.job||''), sub:`${r.result||r.life} · ${r.trigger||''} · ${dur(r.duration)}`, k:ago(r.start), attrs:`data-act="run" data-run="${r.run_id}"`})).join('');
+    if(!list.length) rows = `<div style="color:var(--muted)">No runs in the last 24 hours.</div>`;
+  }
+  box.innerHTML = `<div class="detail"><input class="search catsearch" id="catSearch" placeholder="Filter ${esc(CAT[key].title.toLowerCase())}…" value="${esc(state.catQ||'')}" />
+    <div style="color:var(--dim);font-size:11px;margin-bottom:6px">${count} item${count===1?'':'s'} · click to open</div><div class="list">${rows}</div></div>`;
+  const inp = $('#catSearch'); inp.oninput = () => { state.catQ = inp.value; const pos = inp.selectionStart; renderCatalog(); const n = $('#catSearch'); n.focus(); n.setSelectionRange(pos,pos); };
+  box.querySelectorAll('[data-act]').forEach(el => el.onclick = () => {
+    const id = el.dataset.catId, act = el.dataset.act;
+    if(act==='select'){ const n = nodeById(id); if(state.view!=='map' && n?.type!=='job') setView('map'); select(id, true); }
+    else if(act==='task') openTaskView(id, el.dataset.task);
+    else if(act==='dag') openTaskView(el.dataset.job);
+    else if(act==='run') openTaskView(id, null, +el.dataset.run);
+    else if(act==='dep'){ if(state.view!=='deps') setView('deps'); depNavigate(id); }
+  });
+}
+
+/* ---------------- view switching ---------------- */
+function setView(v){
+  const prev = state.view; state.view = v;
+  const show = (sel, on, disp='block') => $(sel).style.display = on ? disp : 'none';
+  show('#cy', v==='map'); show('#cyTask', v==='tasks'); show('#cyDeps', v==='deps'); show('#live', v==='live');
+  show('#legend', v==='map', 'flex'); show('#layerChips', v==='map', 'flex'); show('#depsum', v==='deps', 'flex'); show('#depLegend', v==='deps', 'flex');
+  document.querySelector('.toolbar').style.display = (v==='map') ? 'flex' : (v==='deps' ? 'flex' : 'none');
+  $('#isoBtn').style.display = $('#layoutSel').style.display = v==='map' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v===v || (v==='tasks' && t.dataset.v===state.prevView)));
+  if(v!=='tasks') clearTimeout(state.taskPoll);
+  if(v==='map'){ setCrumbs([]); if(cy){ cy.resize(); if(prev!=='map') cy.fit(cy.elements(':visible'),50); } }
+  if(v==='deps'){ const sel = state.selected && nodeById(state.selected)?.type==='job' ? state.selected : state.depFocus; depNavigate(sel, true); }
+  if(v==='live'){ setCrumbs([]); renderLive(); pollLive(); }
+  $('#tip').style.display='none';
+}
+
+/* ---------------- dependency view ---------------- */
+function depGraph(){
+  const es = state.data.edges.filter(e => DEP_KINDS.has(e.kind));
+  const out = {}, inn = {};
+  es.forEach(e => { (out[e.source] ||= []).push(e); (inn[e.target] ||= []).push(e); });
+  return {es, out, inn};
+}
+function walk(start, adj, key){
+  const seen = new Set(), q = [start];
+  while(q.length){ const x = q.shift(); (adj[x]||[]).forEach(e => { const y = e[key]; if(!seen.has(y) && y!==start){ seen.add(y); q.push(y); } }); }
+  return seen;
+}
+function depReason(e){
+  if(e.kind==='triggers_job') return `runs it (task ${e.label||''})`;
+  const t = e.tables || [e.label]; return `via ${t.slice(0,2).join(', ')}${t.length>2?` +${t.length-2}`:''}`;
+}
+function depSection(n){
+  const g = depGraph(), up = g.inn[n.id]||[], down = g.out[n.id]||[];
+  const allDown = walk(n.id, g.out, 'target'), allUp = walk(n.id, g.inn, 'source');
+  const item = (id, e, dir) => { const m = nodeById(id); if(!m) return '';
+    return `<div class="it" data-dep="${esc(id)}"><span class="dot ${m.health}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.label)}">${esc(cleanName(m.label))}</span><span class="k" title="${esc((e.tables||[]).join(', '))}">${esc(depReason(e))}</span></div>`; };
+  let h = `<div class="sec"><h4 style="color:#fdba74">Dependencies</h4>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+      <span class="pill">▲ ${allUp.size} upstream</span><span class="pill">▼ ${allDown.size} downstream</span>
+      ${allDown.size?`<span class="pill" style="color:#fca5a5;border-color:rgba(239,68,68,.5)">If this fails, ${allDown.size} job${allDown.size>1?'s':''} affected</span>`:''}</div>`;
+  h += up.length ? `<div style="font-size:11px;color:var(--muted);margin:6px 0 4px">DEPENDS ON</div><div class="list">${up.map(e=>item(e.source,e,'up')).join('')}</div>` : `<div style="font-size:12px;color:var(--dim)">No upstream job dependencies.</div>`;
+  h += down.length ? `<div style="font-size:11px;color:var(--muted);margin:8px 0 4px">NEEDED BY</div><div class="list">${down.map(e=>item(e.target,e,'down')).join('')}</div>` : `<div style="font-size:12px;color:var(--dim);margin-top:6px">Nothing downstream depends on this job.</div>`;
+  return h + '</div>';
+}
+function depNavigate(id, fromTab){
+  state.depFocus = id;
+  if(id){ const i = state.depTrail.indexOf(id); if(i>=0) state.depTrail = state.depTrail.slice(0,i+1); else state.depTrail.push(id); }
+  else state.depTrail = [];
+  if(id && state.selected!==id){ state.selected = id; renderJobList(); renderDetail(); }
+  renderDeps();
+}
+function renderDeps(){
+  if(!state.data) return;
+  const g = depGraph(), F = state.depFocus;
+  let ids, role = {};
+  if(F){
+    const up = walk(F, g.inn, 'source'), down = walk(F, g.out, 'target');
+    up.forEach(i=>role[i]='up'); down.forEach(i=>role[i] = role[i] ? 'both' : 'down'); role[F]='focus';
+    ids = new Set([F, ...up, ...down]);
+  } else {
+    ids = new Set(g.es.flatMap(e=>[e.source,e.target]));
+  }
+  const els = [];
+  ids.forEach(id => { const n = nodeById(id); if(!n) return; const last = n.runs?.[0];
+    els.push({data:{id, label:`${shortLabel(cleanName(n.label).replace(/__/g,' › ').replace(/_/g,' '),70)}\n${n.health==='running'?'● running':n.health} · ${last?ago(last.start):'never run'}`,
+      hcolor:HEALTH[n.health]||C.idle, role:role[id]||'none', health:n.health}}); });
+  g.es.forEach(e => { if(ids.has(e.source) && ids.has(e.target)) els.push({data:{id:e.id, source:e.source, target:e.target, kind:e.kind,
+    label: e.kind==='triggers_job' ? `▶ runs` : `⛁ ${e.label}`, color:EDGE[e.kind].c, ls:EDGE[e.kind].s}}); });
+  if(cyDeps) cyDeps.destroy();
+  cyDeps = cytoscape({container:$('#cyDeps'), elements:els, wheelSensitivity:.25, minZoom:.2, maxZoom:2.5, style:[
+    {selector:'node', style:{'shape':'round-rectangle','width':'label','height':'label','padding':16,'label':'data(label)','text-wrap':'wrap','text-valign':'center','text-halign':'center',
+      'color':'#fff','font-size':15,'font-weight':600,'line-height':1.45,'text-max-width':230,'background-color':'#5b21b6','border-width':4,'border-color':'data(hcolor)','text-outline-width':0}},
+    {selector:'node[role="up"]', style:{'background-color':'#0e7490'}},
+    {selector:'node[role="down"]', style:{'background-color':'#9d174d'}},
+    {selector:'node[role="both"]', style:{'background-color':'#7c2d12'}},
+    {selector:'node[role="focus"]', style:{'background-fill':'linear-gradient','background-gradient-stop-colors':'#f59e0b #db2777','background-gradient-direction':'to-bottom-right',
+      'font-size':17,'padding':22,'underlay-color':'#fbbf24','underlay-opacity':.35,'underlay-padding':12}},
+    {selector:'node[health="running"]', style:{'underlay-color':C.run,'underlay-opacity':.5,'underlay-padding':10}},
+    {selector:'edge', style:{'curve-style':'bezier','width':3,'line-color':'data(color)','target-arrow-color':'data(color)','target-arrow-shape':'triangle','arrow-scale':1.4,
+      'line-style':'data(ls)','label':'data(label)','font-size':12,'color':'#ffe4cc','text-outline-color':'#070b1a','text-outline-width':3,'text-rotation':'autorotate'}},
+    {selector:'edge[kind="triggers_job"]', style:{'color':'#ffc2dd','width':4}},
+    {selector:'node:active, node.hover', style:{'overlay-opacity':0,'border-color':'#fff'}},
+    {selector:'edge.hover', style:{'width':6}},
+  ]});
+  cyDeps.layout({name:'dagre', rankDir:'LR', nodeSep:50, rankSep:130, fit:true, padding:60}).run();
+  if(cyDeps.zoom()>1.3){ cyDeps.zoom(1.3); cyDeps.center(); }
+  cyDeps.on('tap','node', ev => depNavigate(ev.target.id()));
+  cyDeps.on('dbltap','node', ev => openTaskView(ev.target.id()));
+  cyDeps.on('tap','edge', ev => showDepEdge(ev.target.data()));
+  cyDeps.on('tap', ev => { if(ev.target===cyDeps){ state.selected=null; depNavigate(null); renderDetail(); renderJobList(); } });
+  cyDeps.on('mouseover','node,edge', ev => { ev.target.addClass('hover'); const d=ev.target.data(), tip=$('#tip');
+    if(ev.target.isEdge()){ const e = state.data.edges.find(x=>x.id===d.id); tip.innerHTML = `<b>${esc(cleanName(nodeById(d.source).label))} → ${esc(cleanName(nodeById(d.target).label))}</b><span>${e.kind==='triggers_job'?'Directly runs it as task '+esc(e.label):'Shares tables: '+esc((e.tables||[]).join(', '))}</span><br><span style="color:var(--dim)">Click for detail</span>`; }
+    else tip.innerHTML = `<b>${esc(nodeById(d.id).label)}</b><span>Click to re-centre on this job · double-click for task DAG</span>`;
+    const p = ev.renderedPosition || ev.target.renderedPosition?.() || {x:0,y:0}; tip.style.left=Math.min(p.x+16, $('#stage').clientWidth-350)+'px'; tip.style.top=(p.y+16)+'px'; tip.style.display='block'; });
+  cyDeps.on('mouseout','node,edge', ev => { ev.target.removeClass('hover'); $('#tip').style.display='none'; });
+
+  // breadcrumbs = navigation trail
+  const trail = [{t:'All dependencies', go:()=>{ state.selected=null; depNavigate(null); renderDetail(); renderJobList(); }}]
+    .concat(state.depTrail.map((id,i) => ({t: shortLabel(cleanName(nodeById(id)?.label||id), 32), go: i < state.depTrail.length-1 ? (()=>depNavigate(id)) : null})));
+  setCrumbs(trail);
+  const all = jobs().filter(j=>!j.ghost).length;
+  if(F){ const up = Object.values(role).filter(r=>r==='up'||r==='both').length, down = Object.values(role).filter(r=>r==='down'||r==='both').length;
+    $('#depsum').innerHTML = `<span class="pill" style="color:#67e8f9">▲ ${up} upstream</span><span class="pill" style="color:#f9a8d4">▼ ${down} downstream</span>${down?`<span class="pill" style="color:#fca5a5">Impact if it fails: ${down} job${down>1?'s':''}</span>`:''}`;
+  } else $('#depsum').innerHTML = `<span class="pill">${ids.size} of ${all} jobs have dependencies</span><span class="pill">Click a job to trace it</span>`;
+  if(!els.length) $('#depsum').innerHTML = `<span class="pill">No job-to-job dependencies found${state.scan?'':' — turn on Deep scan to detect table-based dependencies'}</span>`;
+}
+function showDepEdge(d){
+  const e = state.data.edges.find(x=>x.id===d.id), a = nodeById(e.source), b = nodeById(e.target), box = $('#detail');
+  $('#detailTitle').textContent = 'Dependency'; $('#clearSel').style.display='inline-block';
+  box.innerHTML = `<div class="detail"><span class="tag" style="--c:${EDGE[e.kind].c}">${e.kind==='triggers_job'?'direct trigger':'data dependency'}</span>
+    <div class="list" style="margin-top:12px"><div class="it" data-dep="${esc(a.id)}"><span class="dot ${a.health}"></span>${esc(cleanName(a.label))}<span class="k">upstream</span></div>
+    <div style="text-align:center;color:${EDGE[e.kind].c};font-size:18px">↓</div>
+    <div class="it" data-dep="${esc(b.id)}"><span class="dot ${b.health}"></span>${esc(cleanName(b.label))}<span class="k">downstream</span></div></div>
+    <div class="sec"><h4>Why</h4>${e.kind==='triggers_job'
+      ? `<div style="font-size:12px">The upstream job has a <code>run_job</code> task <code>${esc(e.label)}</code> that starts the downstream job. The upstream run waits for it to finish.</div>`
+      : `<div style="font-size:12px;margin-bottom:8px">The upstream job writes these tables and the downstream job reads them. If the upstream job fails or is late, the downstream job sees stale data.</div><div class="list">${(e.tables||[]).map(t=>`<div class="it" data-go="tbl:${esc(t)}"><span class="sw" style="background:${C.table}"></span>${esc(t)}<span class="k">table</span></div>`).join('')}</div>`}</div></div>`;
+  box.querySelectorAll('[data-dep]').forEach(el => el.onclick = () => depNavigate(el.dataset.dep));
+  box.querySelectorAll('[data-go]').forEach(el => el.onclick = () => { setView('map'); select(el.dataset.go, true); });
+}
+
+/* ---------------- live view ---------------- */
+async function pollLive(){
+  clearTimeout(state.liveTimer);
+  if(!state.data) return;
+  const profile = state.data.profile;
+  try{
+    const r = await fetch(`/api/active?profile=${encodeURIComponent(profile)}`);
+    if(r.ok && state.data?.profile===profile){ state.live = await r.json(); applyLive(); }
+  }catch(e){ console.warn('live poll failed', e); }
+  state.liveTimer = setTimeout(pollLive, state.view==='live' ? 10000 : 30000);
+}
+function applyLive(){
+  const L = state.live; if(!L) return;
+  $('#liveBadge').textContent = L.active.length;
+  const activeJobs = new Set(L.active.map(r=>`job:${r.job_id}`));
+  jobs().forEach(j => {
+    if(activeJobs.has(j.id)){ if(j.health!=='running'){ j._prevHealth = j.health; j.health='running'; } }
+    else if(j.health==='running' && j._prevHealth!==undefined){ j.health = j._prevHealth; delete j._prevHealth; }
+  });
+  if(cy) cy.batch(()=>jobs().forEach(j => { const n = cy.getElementById(j.id); if(n.length){ n.data('health', j.health); n.data('hcolor', HEALTH[j.health]||C.idle); } }));
+  renderKpis(); renderJobList();
+  if(state.view==='live') renderLive();
+}
+function elapsed(ms){ if(!ms) return '—'; const s = Math.max(0,(Date.now()-ms)/1000|0); const h=s/3600|0, m=(s%3600)/60|0, x=s%60; return h?`${h}h ${m}m`:`${m}m ${String(x).padStart(2,'0')}s`; }
+function renderLive(){
+  const box = $('#live'), L = state.live;
+  if(!L){ box.innerHTML = `<div class="quiet"><div class="loader"></div>Checking what's running…</div>`; return; }
+  const g = depGraph();
+  const running = L.active.filter(r=>r.life==='RUNNING'), queued = L.active.filter(r=>r.life!=='RUNNING');
+  const ok = L.recent.filter(r=>r.result==='SUCCESS').length, bad = L.recent.filter(r=>['FAILED','TIMEDOUT','INTERNAL_ERROR'].includes(r.result)).length;
+  let h = `<div class="livehead">
+    <div class="lstat" style="--c:${C.run}"><div class="l">Running</div><div class="v">${running.length}</div></div>
+    <div class="lstat" style="--c:${C.warn}"><div class="l">Queued / pending</div><div class="v">${queued.length}</div></div>
+    <div class="lstat" style="--c:${C.ok}"><div class="l">Succeeded · last 2h</div><div class="v">${ok}</div></div>
+    <div class="lstat" style="--c:${C.bad}"><div class="l">Failed · last 2h</div><div class="v">${bad}</div></div>
+    <div class="lstat" style="--c:${C.muted}"><div class="l">Updated</div><div class="v" style="font-size:15px;padding-top:8px" data-ago="${L.generated_at}">${ago(L.generated_at)}</div><div style="font-size:11px;color:var(--dim)">${window.SNAPSHOT?'as at snapshot':'auto-refresh every 10s'}</div></div>
+  </div>`;
+  if(!L.active.length) h += `<div class="quiet"><div class="big">🌙</div><div style="font-size:16px;color:var(--text)">Nothing is running right now</div><div>New runs appear here within 10 seconds of starting.</div></div>`;
+  else h += `<div class="cards">${L.active.map(r => {
+    const jid = `job:${r.job_id}`, j = nodeById(jid), name = j ? cleanName(j.label) : (r.run_name || `job ${r.job_id}`);
+    const pct = r.tasks_total ? Math.round(100*r.tasks_done/r.tasks_total) : 0;
+    const downs = [...walk(jid, g.out, 'target')];
+    const cls = r.failed_tasks.length ? 'failing' : r.life==='RUNNING' ? '' : 'queued';
+    return `<div class="card ${cls}">
+      <h5 data-job="${esc(jid)}">${esc(name)}</h5>
+      <div class="meta"><span><span class="dot ${r.life==='RUNNING'?'running':'cancelled'}" style="display:inline-block;vertical-align:middle"></span> ${esc(r.life)}</span>
+        <span>⏱ <b data-start="${r.start}">${elapsed(r.start)}</b></span><span>${esc(r.trigger||'')}</span></div>
+      <div class="bar"><i style="width:${Math.max(pct,3)}%"></i></div>
+      <div class="meta"><span>${r.tasks_done}/${r.tasks_total} tasks done</span><span>${pct}%</span></div>
+      ${r.running_tasks.length?`<div class="tchips">${r.running_tasks.slice(0,6).map(t=>`<span class="tchip">▶ ${esc(t)}</span>`).join('')}${r.running_tasks.length>6?`<span class="tchip">+${r.running_tasks.length-6}</span>`:''}</div>`:''}
+      ${r.waiting_tasks?.length?`<div class="meta" style="margin-top:6px">⏸ ${r.waiting_tasks.length} task${r.waiting_tasks.length>1?'s':''} waiting on upstream steps</div>`:''}
+      ${r.failed_tasks.length?`<div class="tchips">${r.failed_tasks.map(t=>`<span class="tchip bad">✗ ${esc(t)}</span>`).join('')}</div>`:''}
+      ${downs.length?`<div style="font-size:11px;color:var(--muted);margin-top:10px">WAITING DOWNSTREAM</div><div class="tchips">${downs.slice(0,5).map(d=>`<span class="tchip dep" data-depjob="${esc(d)}" title="${esc(nodeById(d)?.label||d)}">${esc(midLabel(cleanName(nodeById(d)?.label||d),32))}</span>`).join('')}${downs.length>5?`<span class="tchip">+${downs.length-5}</span>`:''}</div>`:''}
+      <div class="actions">${j?`<button class="btn" data-livedag="${esc(jid)}" data-run="${r.run_id}">Live task DAG</button><button class="btn ghost" data-depjob="${esc(jid)}">⇄ Dependencies</button>`:''}<a class="btn ghost" href="${esc(r.url||'#')}" target="_blank">Run ↗</a></div>
+    </div>`; }).join('')}</div>`;
+  if(L.recent.length) h += `<div class="sec" style="margin-top:22px"><h4>Finished in the last 2 hours</h4><div class="list recent">${L.recent.map(r => { const j = nodeById(`job:${r.job_id}`);
+    return `<a class="it" href="${esc(r.url||'#')}" target="_blank"><span class="dot ${runHealth(r)}"></span><span>${esc(j?cleanName(j.label):r.run_name)}</span><span class="t">${esc(r.result||r.life)}</span><span class="t">${ago(r.end||r.start)}</span></a>`; }).join('')}</div></div>`;
+  box.innerHTML = h;
+  box.querySelectorAll('[data-job]').forEach(el => el.onclick = () => select(el.dataset.job));
+  box.querySelectorAll('[data-livedag]').forEach(el => el.onclick = () => openTaskView(el.dataset.livedag, null, +el.dataset.run));
+  box.querySelectorAll('[data-depjob]').forEach(el => el.onclick = () => { setView('deps'); depNavigate(el.dataset.depjob); });
+}
+setInterval(() => { if(state.view!=='live') return; document.querySelectorAll('#live [data-start]').forEach(el => el.textContent = elapsed(+el.dataset.start));
+  document.querySelectorAll('#live [data-ago]').forEach(el => el.textContent = ago(+el.dataset.ago)); }, 1000);
+function setCrumbs(list){
+  $('#crumbs').innerHTML = list.map((c,i)=>`<span class="pill" ${c.go?`style="cursor:pointer;color:var(--nb)" data-i="${i}"`:''}>${i?'› ':''}${esc(c.t)}</span>`).join('');
+  $('#crumbs').querySelectorAll('[data-i]').forEach(el => el.onclick = list[+el.dataset.i].go);
+}
+
+function renderLegend(){
+  const kinds = new Set(state.data.edges.map(e=>e.kind));
+  $('#legend').innerHTML = `<div class="row" style="color:var(--text);font-weight:600" title="Click to collapse">Connections ▾</div>` +
+    Object.entries(EDGE).filter(([k])=>kinds.has(k)).map(([k,v])=>`<div class="row"><span class="ln" style="border-top-color:${v.c};border-top-style:${v.s};border-top-width:${Math.max(2,v.w)}px"></span>${v.name}</div>`).join('') +
+    `<div class="row" style="color:var(--text);font-weight:600;margin-top:4px">Job ring = last run</div>
+     <div class="row">${['success','failed','running','idle'].map(h=>`<span class="dot ${h}"></span>${h}`).join(' ')}</div>
+     <div class="row"><span class="sw" style="border:3px solid #facc15;border-radius:50%;background:${C.notebook}"></span>Shared notebook</div>`;
+}
+
+/* ---------------- wiring ---------------- */
+$('#loadBtn').onclick = () => load(true);
+$('#shareBtn').onclick = e => { e.stopPropagation(); const p = $('#sharePop'); p.style.display = p.style.display==='none' ? 'block' : 'none'; };
+$('#sharePop').onclick = e => e.stopPropagation();
+document.addEventListener('click', () => $('#sharePop').style.display='none');
+$('#exportBtn').onclick = async () => {
+  const b = $('#exportBtn'), profile = $('#env').value; b.disabled = true; b.textContent = 'Building snapshot…';
+  try{
+    const r = await fetch(`/api/snapshot?profile=${encodeURIComponent(profile)}&redact=${$('#redactChk').checked}`);
+    if(!r.ok) throw new Error(await r.text());
+    const name = (r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)?.[1] || 'job-constellation.html';
+    const url = URL.createObjectURL(await r.blob()); const a = Object.assign(document.createElement('a'), {href:url, download:name}); a.click(); URL.revokeObjectURL(url);
+    b.textContent = '✓ Downloaded'; setTimeout(()=>{ b.textContent='Download .html'; $('#sharePop').style.display='none'; }, 1500);
+  }catch(e){ b.textContent = 'Failed — see console'; console.error(e); }
+  b.disabled = false;
+};
+$('#env').onchange = () => load(false);
+$('#scanBtn').onclick = e => { state.scan=!state.scan; e.target.textContent=`Deep scan: ${state.scan?'on':'off'}`; e.target.classList.toggle('on', state.scan); };
+$('#autoBtn').onclick = e => { if(state.auto){ clearInterval(state.auto); state.auto=null; } else state.auto=setInterval(()=>load(true), 60000);
+  e.target.textContent=`Auto: ${state.auto?'60s':'off'}`; e.target.classList.toggle('on', !!state.auto); };
+$('#layoutSel').onchange = runLayout;
+$('#legend').onclick = e => { if(e.target.closest('.row:first-child')) $('#legend').classList.toggle('min'); };
+$('#fitBtn').onclick = () => ({tasks:cyTask, deps:cyDeps, map:cy})[state.view]?.fit(undefined,50);
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => { if(state.data){ setView(t.dataset.v); renderKpis(); } });
+$('#isoBtn').onclick = e => { state.hideIso=!state.hideIso; e.target.classList.toggle('on', state.hideIso); applyFilters(); runLayout(); };
+$('#clearSel').onclick = () => { if(state.selected) select(null); else { state.catalog=null; renderKpis(); renderDetail(); } };
+let st; $('#search').oninput = () => { clearTimeout(st); st=setTimeout(()=>{ renderJobList(); applyFilters(); }, 150); };
+document.addEventListener('keydown', e => { if(e.key==='Escape'){ if(state.view==='tasks') backToMap(); else if(state.view==='deps' && state.depTrail.length>1) depNavigate(state.depTrail[state.depTrail.length-2]); else select(null); } if(e.key==='/' && document.activeElement.tagName!=='INPUT'){ e.preventDefault(); $('#search').focus(); } });
+window.addEventListener('resize', () => { cy?.resize(); cyTask?.resize(); cyDeps?.resize(); });
+loadEnvs();
+</script>
+</body>
+</html>
